@@ -1,0 +1,371 @@
+// ============================================================================
+// TMS LATAM - Esquema de base de datos
+// Multi-tenant: cada "Empresa" es una empresa transportista cliente del SaaS.
+// Todo el dato operativo cuelga de empresaId para aislar la información.
+// ============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ----------------------------------------------------------------------------
+// SUSCRIPCIÓN SAAS (cobro mensual de la plataforma a la empresa transportista)
+// ----------------------------------------------------------------------------
+
+enum PlanCodigo {
+  BASICO
+  PROFESIONAL
+  EMPRESARIAL
+}
+
+model Plan {
+  id              String   @id @default(cuid())
+  codigo          PlanCodigo @unique
+  nombre          String
+  precioMensual   Decimal  @db.Decimal(10, 2)
+  limiteVehiculos Int
+  limiteUsuarios  Int
+  limiteFacturasMes Int
+  incluyeRH       Boolean  @default(true)
+  incluyeTimbrado Boolean  @default(true)
+  descripcion     String?
+  suscripciones   Suscripcion[]
+  createdAt       DateTime @default(now())
+}
+
+enum EstatusSuscripcion {
+  EN_PRUEBA
+  ACTIVA
+  PAGO_PENDIENTE
+  SUSPENDIDA
+  CANCELADA
+}
+
+model Suscripcion {
+  id              String   @id @default(cuid())
+  empresa         Empresa  @relation(fields: [empresaId], references: [id])
+  empresaId       String   @unique
+  plan            Plan     @relation(fields: [planId], references: [id])
+  planId          String
+  estatus         EstatusSuscripcion @default(EN_PRUEBA)
+  fechaInicio     DateTime @default(now())
+  fechaFinPrueba  DateTime?
+  fechaProximoCobro DateTime?
+  proveedorPago   String   @default("manual") // manual | stripe
+  referenciaPago  String?  // ej. customerId/subscriptionId de Stripe
+  pagos           Pago[]
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+enum EstatusPago {
+  PENDIENTE
+  PAGADO
+  FALLIDO
+  REEMBOLSADO
+}
+
+model Pago {
+  id              String   @id @default(cuid())
+  suscripcion     Suscripcion @relation(fields: [suscripcionId], references: [id])
+  suscripcionId   String
+  monto           Decimal  @db.Decimal(10, 2)
+  periodoInicio   DateTime
+  periodoFin      DateTime
+  estatus         EstatusPago @default(PENDIENTE)
+  referenciaPago  String?
+  pagadoEn        DateTime?
+  createdAt       DateTime @default(now())
+}
+
+// ----------------------------------------------------------------------------
+// EMPRESA (tenant) Y USUARIOS
+// ----------------------------------------------------------------------------
+
+model Empresa {
+  id              String   @id @default(cuid())
+  nombre          String
+  rfc             String?
+  regimenFiscal   String?
+  codigoPostal    String?
+  direccion       String?
+  telefono        String?
+  emailContacto   String?
+  logoUrl         String?
+  activa          Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  usuarios        Usuario[]
+  vehiculos       Vehiculo[]
+  choferes        Chofer[]
+  mantenimientos  Mantenimiento[]
+  clientes        ClienteFacturacion[]
+  facturas        Factura[]
+  empleados       Empleado[]
+  suscripcion     Suscripcion?
+  seriesFiscales  SerieFiscal[]
+}
+
+enum RolUsuario {
+  ADMIN          // dueño/administrador de la empresa transportista
+  OPERADOR_FLOTA
+  FACTURACION
+  RH
+  SOLO_LECTURA
+}
+
+model Usuario {
+  id              String   @id @default(cuid())
+  empresa         Empresa  @relation(fields: [empresaId], references: [id])
+  empresaId       String
+  nombre          String
+  email           String   @unique
+  passwordHash    String
+  rol             RolUsuario @default(ADMIN)
+  activo          Boolean  @default(true)
+  createdAt       DateTime @default(now())
+}
+
+// ----------------------------------------------------------------------------
+// CONTROL DE FLOTA
+// ----------------------------------------------------------------------------
+
+enum EstatusVehiculo {
+  DISPONIBLE
+  EN_RUTA
+  EN_MANTENIMIENTO
+  FUERA_DE_SERVICIO
+}
+
+model Vehiculo {
+  id              String   @id @default(cuid())
+  empresa         Empresa  @relation(fields: [empresaId], references: [id])
+  empresaId       String
+  numeroEconomico String
+  placas          String
+  marca           String
+  modelo          String
+  anio            Int
+  tipo            String   // tractocamion, caja, torton, etc.
+  capacidadCarga  Decimal? @db.Decimal(10, 2)
+  odometroKm      Decimal  @default(0) @db.Decimal(12, 2)
+  estatus         EstatusVehiculo @default(DISPONIBLE)
+  polizaSeguro    String?
+  vigenciaSeguro  DateTime?
+  vigenciaPermiso DateTime?
+  notas           String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  choferAsignado  Chofer?  @relation(fields: [choferAsignadoId], references: [id])
+  choferAsignadoId String?
+  mantenimientos  Mantenimiento[]
+  facturaItems    FacturaItem[]
+
+  @@unique([empresaId, placas])
+  @@index([empresaId])
+}
+
+enum EstatusChofer {
+  ACTIVO
+  INACTIVO
+  DE_BAJA
+}
+
+model Chofer {
+  id              String   @id @default(cuid())
+  empresa         Empresa  @relation(fields: [empresaId], references: [id])
+  empresaId       String
+  nombre          String
+  licencia        String
+  tipoLicencia    String?
+  vigenciaLicencia DateTime?
+  telefono        String?
+  estatus         EstatusChofer @default(ACTIVO)
+  empleadoId      String?  @unique // vínculo opcional con RH
+  empleado        Empleado? @relation(fields: [empleadoId], references: [id])
+  vehiculos       Vehiculo[]
+  createdAt       DateTime @default(now())
+
+  @@index([empresaId])
+}
+
+// ----------------------------------------------------------------------------
+// MANTENIMIENTO (integrado a flota)
+// ----------------------------------------------------------------------------
+
+enum TipoMantenimiento {
+  PREVENTIVO
+  CORRECTIVO
+}
+
+enum EstatusMantenimiento {
+  PROGRAMADO
+  EN_PROCESO
+  COMPLETADO
+  CANCELADO
+}
+
+model Mantenimiento {
+  id                String   @id @default(cuid())
+  empresa           Empresa  @relation(fields: [empresaId], references: [id])
+  empresaId         String
+  vehiculo          Vehiculo @relation(fields: [vehiculoId], references: [id])
+  vehiculoId        String
+  tipo              TipoMantenimiento @default(PREVENTIVO)
+  descripcion       String
+  estatus           EstatusMantenimiento @default(PROGRAMADO)
+  kmProgramado      Decimal? @db.Decimal(12, 2) // dispara alerta cuando el odómetro llega aquí
+  fechaProgramada   DateTime?
+  fechaRealizado    DateTime?
+  kmAlRealizar      Decimal? @db.Decimal(12, 2)
+  costo             Decimal? @db.Decimal(10, 2)
+  taller            String?
+  notas             String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([empresaId])
+  @@index([vehiculoId])
+}
+
+// ----------------------------------------------------------------------------
+// FACTURACIÓN + TIMBRADO CFDI
+// ----------------------------------------------------------------------------
+
+model ClienteFacturacion {
+  id              String   @id @default(cuid())
+  empresa         Empresa  @relation(fields: [empresaId], references: [id])
+  empresaId       String
+  razonSocial     String
+  rfc             String
+  usoCfdi         String   @default("G03")
+  regimenFiscalReceptor String @default("616")
+  codigoPostal    String
+  email           String?
+  telefono        String?
+  facturas        Factura[]
+  createdAt       DateTime @default(now())
+
+  @@index([empresaId])
+}
+
+// Folios fiscales por serie, requerido para llevar control de timbrado por empresa
+model SerieFiscal {
+  id              String   @id @default(cuid())
+  empresa         Empresa  @relation(fields: [empresaId], references: [id])
+  empresaId       String
+  serie           String   @default("A")
+  ultimoFolio     Int      @default(0)
+
+  @@unique([empresaId, serie])
+}
+
+enum EstatusFactura {
+  BORRADOR
+  TIMBRADA
+  CANCELADA
+  ERROR_TIMBRADO
+}
+
+model Factura {
+  id              String   @id @default(cuid())
+  empresa         Empresa  @relation(fields: [empresaId], references: [id])
+  empresaId       String
+  cliente         ClienteFacturacion @relation(fields: [clienteId], references: [id])
+  clienteId       String
+  serie           String   @default("A")
+  folio           Int
+  subtotal        Decimal  @db.Decimal(12, 2)
+  iva             Decimal  @db.Decimal(12, 2)
+  total           Decimal  @db.Decimal(12, 2)
+  moneda          String   @default("MXN")
+  formaPago       String   @default("99")
+  metodoPago      String   @default("PUE")
+  estatus         EstatusFactura @default(BORRADOR)
+
+  // Datos de timbrado CFDI (se llenan al timbrar)
+  uuidFiscal      String?  @unique
+  xmlCfdi         String?  @db.Text
+  selloDigital    String?  @db.Text
+  fechaTimbrado   DateTime?
+  pacUsado        String?
+  motivoCancelacion String?
+
+  items           FacturaItem[]
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([empresaId, serie, folio])
+  @@index([empresaId])
+}
+
+model FacturaItem {
+  id              String   @id @default(cuid())
+  factura         Factura  @relation(fields: [facturaId], references: [id], onDelete: Cascade)
+  facturaId       String
+  vehiculo        Vehiculo? @relation(fields: [vehiculoId], references: [id])
+  vehiculoId      String?
+  claveProdServ   String   @default("78101800") // transporte de carga
+  claveUnidad     String   @default("E48")      // servicio
+  descripcion     String
+  cantidad        Decimal  @default(1) @db.Decimal(10, 2)
+  precioUnitario  Decimal  @db.Decimal(12, 2)
+  importe         Decimal  @db.Decimal(12, 2)
+}
+
+// ----------------------------------------------------------------------------
+// RECURSOS HUMANOS (RH)
+// ----------------------------------------------------------------------------
+
+enum EstatusEmpleado {
+  ACTIVO
+  BAJA
+}
+
+model Empleado {
+  id              String   @id @default(cuid())
+  empresa         Empresa  @relation(fields: [empresaId], references: [id])
+  empresaId       String
+  nombre          String
+  puesto          String
+  departamento    String   @default("Operaciones")
+  fechaIngreso    DateTime
+  fechaBaja       DateTime?
+  salarioMensual  Decimal? @db.Decimal(10, 2)
+  email           String?
+  telefono        String?
+  estatus         EstatusEmpleado @default(ACTIVO)
+  chofer          Chofer?
+  incidencias     Incidencia[]
+  createdAt       DateTime @default(now())
+
+  @@index([empresaId])
+}
+
+enum TipoIncidencia {
+  FALTA
+  VACACIONES
+  PERMISO
+  INCAPACIDAD
+  RETARDO
+}
+
+model Incidencia {
+  id              String   @id @default(cuid())
+  empleado        Empleado @relation(fields: [empleadoId], references: [id])
+  empleadoId      String
+  tipo            TipoIncidencia
+  fechaInicio     DateTime
+  fechaFin        DateTime
+  motivo          String?
+  createdAt       DateTime @default(now())
+
+  @@index([empleadoId])
+}
