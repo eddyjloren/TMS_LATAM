@@ -113,6 +113,7 @@ model Empresa {
 }
 
 enum RolUsuario {
+  SUPER_ADMIN    // administrador de la plataforma (no de una sola empresa)
   ADMIN          // dueño/administrador de la empresa transportista
   OPERADOR_FLOTA
   FACTURACION

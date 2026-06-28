@@ -1,4 +1,5 @@
 import Link from "next/link";
+import type { SesionTms } from "@/lib/session";
 
 const ENLACES = [
   { href: "/dashboard", label: "Resumen", icono: "📊" },
@@ -11,7 +12,11 @@ const ENLACES = [
   { href: "/dashboard/suscripcion", label: "Suscripción", icono: "💳" }
 ];
 
-export function Sidebar() {
+const ENLACE_SUPER_ADMIN = { href: "/dashboard/admin-plataforma", label: "Panel Super Admin", icono: "🛡️" };
+
+export function Sidebar({ sesion }: { sesion?: SesionTms }) {
+  const enlaces = sesion?.rol === "SUPER_ADMIN" ? [...ENLACES, ENLACE_SUPER_ADMIN] : ENLACES;
+
   return (
     <aside className="hidden w-64 flex-shrink-0 border-r border-slate-200 bg-white md:block">
       <div className="px-5 py-5">
@@ -20,7 +25,7 @@ export function Sidebar() {
         </Link>
       </div>
       <nav className="space-y-1 px-3">
-        {ENLACES.map((enlace) => (
+        {enlaces.map((enlace) => (
           <Link
             key={enlace.href}
             href={enlace.href}

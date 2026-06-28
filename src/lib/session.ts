@@ -6,7 +6,7 @@ export type SesionTms = {
   id: string;
   name: string;
   email: string;
-  rol: "ADMIN" | "OPERADOR_FLOTA" | "FACTURACION" | "RH" | "SOLO_LECTURA";
+  rol: "SUPER_ADMIN" | "ADMIN" | "OPERADOR_FLOTA" | "FACTURACION" | "RH" | "SOLO_LECTURA";
   empresaId: string;
   empresaNombre: string;
 };
